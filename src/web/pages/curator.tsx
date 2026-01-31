@@ -164,6 +164,31 @@ function CuratorPage() {
     };
     localStorage.setItem("curator_state", JSON.stringify(curatorState));
     
+    // Save this curator to the user's curator list
+    const newCurator = {
+      id: `curator_${Date.now()}`,
+      name: prompt.trim().length > 30 ? prompt.trim().substring(0, 30) + "..." : prompt.trim(),
+      prompt: prompt.trim(),
+      selectedTwitter: selectedTwitterSources.map((acc) => acc.handle),
+      selectedRss: selectedRSSSources.map((source) => source.name),
+      createdAt: new Date().toISOString(),
+    };
+    
+    // Get existing curators and add new one
+    const existingCurators = localStorage.getItem("curious_curators");
+    const curators = existingCurators ? JSON.parse(existingCurators) : [];
+    
+    // Check if curator with same prompt doesn't already exist
+    const isDuplicate = curators.some((c: { prompt: string }) => c.prompt.toLowerCase() === newCurator.prompt.toLowerCase());
+    if (!isDuplicate) {
+      curators.unshift(newCurator); // Add to beginning
+      // Keep only latest 10 curators
+      if (curators.length > 10) {
+        curators.pop();
+      }
+      localStorage.setItem("curious_curators", JSON.stringify(curators));
+    }
+    
     // Navigate with URL search params
     const encodedPrompt = encodeURIComponent(prompt.trim());
     setLocation(`/results?prompt=${encodedPrompt}`);
@@ -200,8 +225,8 @@ function CuratorPage() {
         }`}
       >
         <Link href="/">
-          <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center">
+          <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity group">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center group-hover:shadow-lg group-hover:shadow-indigo-600/30 transition-shadow">
               <svg
                 className="w-5 h-5 text-white"
                 fill="none"
@@ -216,8 +241,11 @@ function CuratorPage() {
                 />
               </svg>
             </div>
-            <span className="text-xl font-semibold text-gray-900 tracking-tight">
-              curious.ai
+            <span className="text-xl font-bold tracking-tight">
+              <span className="bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 bg-clip-text text-transparent">
+                curious
+              </span>
+              <span className="text-gray-900">.ai</span>
             </span>
           </div>
         </Link>
@@ -347,7 +375,7 @@ function CuratorPage() {
               or add a source directly
             </p>
 
-            <div className="grid grid-cols-2 gap-4 max-w-lg mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mx-auto">
               {/* Twitter Card */}
               <button
                 onClick={() => setShowTwitterModal(true)}
@@ -794,7 +822,10 @@ function CuratorPage() {
                 />
               </svg>
             </div>
-            <span className="text-sm font-medium text-gray-700">curious.ai</span>
+            <span className="text-sm font-bold">
+              <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">curious</span>
+              <span className="text-gray-700">.ai</span>
+            </span>
           </div>
           <p className="text-sm text-gray-500">
             © curious.ai 2026. All rights reserved.
