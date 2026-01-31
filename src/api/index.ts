@@ -151,7 +151,7 @@ app.post('/gemini-news', async (c) => {
       return c.json({ error: 'Query is required' }, 400);
     }
 
-    const GEMINI_API_KEY = 'AIzaSyB8yDX13cLlqz1rhM1oA8H_Lzoi8uoUG8M';
+    const GEMINI_API_KEY = 'AIzaSyBPZx1FFPfxbpU-WzKfkSd-Hz9UxYpfKkc';
     const MODEL = 'gemini-2.0-flash';
 
     const prompt = `You are a news aggregator. Search for and provide the top 10 most recent and relevant news articles about: ${query}. 

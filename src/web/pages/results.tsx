@@ -355,18 +355,22 @@ function ResultsPage() {
 
   const fetchGeminiNews = useCallback(async (query: string): Promise<GeminiArticle[]> => {
     try {
+      console.log('Making API call to /api/gemini-news with query:', query);
       const response = await fetch("/api/gemini-news", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
       });
 
+      console.log('API response status:', response.status, response.ok);
+      
       if (!response.ok) {
-        console.error("Gemini API error");
+        console.error("Gemini API error - response not ok");
         return [];
       }
 
       const data = await response.json();
+      console.log('API response data:', data);
       return data.articles || [];
     } catch (error) {
       console.error("Failed to fetch Gemini news:", error);
@@ -490,8 +494,10 @@ function ResultsPage() {
       });
 
       // Add Gemini articles
-      geminiArticles.forEach((article) => {
+      console.log('Processing Gemini articles:', geminiArticles.length);
+      geminiArticles.forEach((article, idx) => {
         const topic = detectTopic(article.title + " " + article.summary);
+        console.log(`Gemini article ${idx}: topic=${topic}, title=${article.title.substring(0, 50)}`);
         ensureTopicGroup(topic, article.publishedDate);
 
         // Use Gemini article as main if no main exists or only tweets exist
@@ -564,7 +570,9 @@ function ResultsPage() {
       setLoading(true);
 
       // Fetch from Gemini API
+      console.log('Fetching Gemini news for prompt:', curatorState.prompt);
       const geminiArticles = await fetchGeminiNews(curatorState.prompt);
+      console.log('Gemini articles received:', geminiArticles.length, geminiArticles);
 
       // Cluster all news
       const newClusters = clusterNews(
@@ -573,6 +581,7 @@ function ResultsPage() {
         curatorState.selectedRSS,
         geminiArticles
       );
+      console.log('Clusters created:', newClusters.length, newClusters);
 
       setClusters(newClusters);
       setLoading(false);
