@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { twitterUsers } from "../data/mockData";
 
 interface User {
   email: string;
@@ -13,7 +12,7 @@ interface TwitterAccount {
   name: string;
   avatar: string;
   bio: string;
-  followers: number;
+  followers?: number;
   selected: boolean;
 }
 
@@ -24,16 +23,33 @@ interface RSSSource {
   selected: boolean;
 }
 
-// Initialize Twitter accounts from mock data
-const initialTwitterAccounts: TwitterAccount[] = twitterUsers.map((user) => ({
-  id: user.id,
-  handle: user.handle,
-  name: user.name,
-  avatar: user.avatar,
-  bio: user.bio,
-  followers: user.followers,
-  selected: false,
-}));
+// New Twitter accounts - Sam Altman, Y Combinator, Bill Gates
+const initialTwitterAccounts: TwitterAccount[] = [
+  {
+    id: 'sama',
+    handle: '@sama',
+    name: 'Sam Altman',
+    avatar: 'https://pbs.twimg.com/profile_images/804990434455887872/BG0Xh7Oa_400x400.jpg',
+    bio: 'CEO of OpenAI',
+    selected: false,
+  },
+  {
+    id: 'ycombinator',
+    handle: '@ycombinator',
+    name: 'Y Combinator',
+    avatar: 'https://pbs.twimg.com/profile_images/1605577940795981824/79emv-5y_400x400.jpg',
+    bio: 'Startup accelerator. We back founders at the earliest stages.',
+    selected: false,
+  },
+  {
+    id: 'BillGates',
+    handle: '@BillGates',
+    name: 'Bill Gates',
+    avatar: 'https://pbs.twimg.com/profile_images/1884274381386625024/5unxp1hx_400x400.jpg',
+    bio: 'Co-chair of the Bill & Melinda Gates Foundation.',
+    selected: false,
+  },
+];
 
 const rssSources: RSSSource[] = [
   {
@@ -56,23 +72,13 @@ const rssSources: RSSSource[] = [
   },
 ];
 
-// Suggestion chips that match our mock data topics
+// Suggestion chips that match our data topics
 const suggestionChips = [
   "AI developments",
-  "Cricket news",
-  "Global geopolitics",
-  "Health tech",
+  "Startup funding",
+  "Climate change",
+  "Global health",
 ];
-
-const formatFollowers = (count: number): string => {
-  if (count >= 1000000) {
-    return `${(count / 1000000).toFixed(1)}M`;
-  }
-  if (count >= 1000) {
-    return `${(count / 1000).toFixed(1)}K`;
-  }
-  return count.toString();
-};
 
 function CuratorPage() {
   const [mounted, setMounted] = useState(false);
@@ -640,12 +646,6 @@ function CuratorPage() {
                       <p className="text-xs text-gray-400 mt-1 truncate">
                         {account.bio}
                       </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-gray-700">
-                        {formatFollowers(account.followers)}
-                      </p>
-                      <p className="text-xs text-gray-400">followers</p>
                     </div>
                   </div>
                 </button>

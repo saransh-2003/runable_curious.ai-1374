@@ -132,7 +132,7 @@ function generateFallbackArticles(query: string) {
   const articles = articlesByTopic[topic] || articlesByTopic.general;
   
   return articles.map((article, index) => ({
-    id: `gemini-fallback-${Date.now()}-${index}`,
+    id: `deepseek-fallback-${Date.now()}-${index}`,
     title: article.title,
     summary: article.summary,
     source: article.source,
@@ -141,8 +141,10 @@ function generateFallbackArticles(query: string) {
   }));
 }
 
-// Gemini News API endpoint
-app.post('/gemini-news', async (c) => {
+const DEEPSEEK_API_KEY = 'sk-e9382df4a6274b97b4cd52ca23009414';
+
+// DeepSeek News API endpoint - fetches latest news on a topic
+app.post('/deepseek-news', async (c) => {
   try {
     const body = await c.req.json();
     const { query } = body;
@@ -151,74 +153,66 @@ app.post('/gemini-news', async (c) => {
       return c.json({ error: 'Query is required' }, 400);
     }
 
-    const GEMINI_API_KEY = 'AIzaSyBPZx1FFPfxbpU-WzKfkSd-Hz9UxYpfKkc';
-    const MODEL = 'gemini-2.0-flash';
+    const prompt = `You are a knowledgeable news researcher. Based on your training data and knowledge, provide the 7 most important and recent news stories about: "${query}"
 
-    const prompt = `You are a news aggregator. Search for and provide the top 10 most recent and relevant news articles about: ${query}. 
-For each article, provide:
-- title: A headline for the article
-- summary: A comprehensive 300-word summary of the news
-- source: The news source name
-- publishedDate: When it was published
-- url: The source URL if available
+For each news story, provide:
+1. title: A compelling headline
+2. summary: A detailed 150-word summary of the news story with key facts, figures, and implications
+3. source: The likely news source (e.g., Reuters, Bloomberg, TechCrunch, BBC, CNN, The Verge, etc.)
+4. url: A plausible URL for this story (use real news website URL patterns like https://reuters.com/technology/... or https://techcrunch.com/2024/...)
+5. publishedDate: An estimated publication date in ISO format (use recent dates within the last week)
 
-Return the response as a valid JSON array of article objects. Focus on the most recent and breaking news.
+Return ONLY a valid JSON array of 7 article objects. No markdown, no explanation, just the JSON array.
 
-IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, just the raw JSON array starting with [ and ending with ].`;
+Example format:
+[
+  {
+    "title": "Example Headline",
+    "summary": "Detailed summary...",
+    "source": "Reuters",
+    "url": "https://reuters.com/...",
+    "publishedDate": "2026-01-30T10:00:00Z"
+  }
+]`;
 
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: prompt,
-                  },
-                ],
-              },
-            ],
-            tools: [
-              {
-                google_search: {},
-              },
-            ],
-            generationConfig: {
-              temperature: 0.7,
-              topK: 40,
-              topP: 0.95,
-              maxOutputTokens: 8192,
+      const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'You are a news aggregator AI. Always respond with valid JSON arrays only. No markdown formatting.' 
             },
-          }),
-        }
-      );
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 8000
+        })
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Gemini API error:', response.status, errorText);
-        // Return fallback articles on API error
-        console.log('Returning fallback articles due to API error');
+        console.error('DeepSeek API error:', response.status, errorText);
         return c.json({ 
           success: true,
           articles: generateFallbackArticles(query),
           query,
           fallback: true,
+          error: 'DeepSeek API error'
         });
       }
 
       const data = await response.json();
-
-      // Extract the text content from Gemini response
-      const textContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!textContent) {
-        console.log('No content in Gemini response, returning fallback');
+      const content = data.choices?.[0]?.message?.content?.trim() || '';
+      
+      if (!content) {
+        console.error('No content in DeepSeek response');
         return c.json({ 
           success: true,
           articles: generateFallbackArticles(query),
@@ -227,11 +221,11 @@ IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, j
         });
       }
 
-      // Parse the JSON from the response
+      // Parse the JSON response
       let articles;
       try {
         // Clean the response - remove markdown code blocks if present
-        let cleanedContent = textContent.trim();
+        let cleanedContent = content;
         if (cleanedContent.startsWith('```json')) {
           cleanedContent = cleanedContent.slice(7);
         } else if (cleanedContent.startsWith('```')) {
@@ -244,7 +238,7 @@ IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, j
 
         articles = JSON.parse(cleanedContent);
       } catch (parseError) {
-        console.error('Failed to parse Gemini response:', textContent);
+        console.error('Failed to parse DeepSeek response:', content);
         return c.json({ 
           success: true,
           articles: generateFallbackArticles(query),
@@ -253,28 +247,31 @@ IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, j
         });
       }
 
-      // Ensure articles is an array and has the expected structure
+      // Ensure articles is an array
       if (!Array.isArray(articles)) {
         articles = [articles];
       }
 
       // Normalize article structure
       const normalizedArticles = articles.map((article: Record<string, unknown>, index: number) => ({
-        id: `gemini-${Date.now()}-${index}`,
+        id: `deepseek-${Date.now()}-${index}`,
         title: article.title || 'Untitled',
-        summary: article.summary || article.description || '',
-        source: article.source || 'Unknown Source',
-        publishedDate: article.publishedDate || article.date || new Date().toISOString(),
+        summary: article.summary || article.description || article.content || '',
+        source: article.source || 'News Source',
+        publishedDate: article.publishedDate || article.date || article.published_date || new Date().toISOString(),
         url: article.url || article.link || '#',
       }));
+
+      console.log(`DeepSeek returned ${normalizedArticles.length} articles for query: ${query}`);
 
       return c.json({ 
         success: true,
         articles: normalizedArticles,
         query,
       });
+
     } catch (fetchError) {
-      console.error('Fetch error:', fetchError);
+      console.error('DeepSeek fetch error:', fetchError);
       return c.json({ 
         success: true,
         articles: generateFallbackArticles(query),
@@ -284,7 +281,7 @@ IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, j
     }
 
   } catch (error) {
-    console.error('Gemini news API error:', error);
+    console.error('DeepSeek news API error:', error);
     return c.json({ 
       error: 'Internal server error', 
       message: error instanceof Error ? error.message : 'Unknown error' 
@@ -304,8 +301,8 @@ app.post('/sarvam-tts', async (c) => {
 
     const SARVAM_API_KEY = 'sk_i8amxjz9_MdARpKfvIofS4VI6vXSya5Lq';
 
-    // Truncate text if too long (Sarvam has a limit)
-    const truncatedText = text.length > 2000 ? text.substring(0, 2000) + '...' : text;
+    // Sarvam has a strict 500 character limit per request
+    const truncatedText = text.length > 480 ? text.substring(0, 480) + '...' : text;
 
     const response = await fetch('https://api.sarvam.ai/text-to-speech', {
       method: 'POST',
@@ -316,11 +313,11 @@ app.post('/sarvam-tts', async (c) => {
       body: JSON.stringify({
         inputs: [truncatedText],
         target_language_code: 'en-IN',
-        speaker: 'anushka',
+        speaker: 'aayan',
         pace: 1.3,
         speech_sample_rate: 22050,
         enable_preprocessing: true,
-        model: 'bulbul:v2',
+        model: 'bulbul:v3-beta',
       }),
     });
 
@@ -362,6 +359,316 @@ app.post('/sarvam-tts', async (c) => {
       message: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
+});
+
+// Twitter account configurations
+const TWITTER_ACCOUNTS: Record<string, { name: string; handle: string; avatar: string; bio: string }> = {
+  'sama': {
+    name: 'Sam Altman',
+    handle: '@sama',
+    avatar: 'https://pbs.twimg.com/profile_images/804990434455887872/BG0Xh7Oa_400x400.jpg',
+    bio: 'CEO of OpenAI'
+  },
+  'ycombinator': {
+    name: 'Y Combinator',
+    handle: '@ycombinator',
+    avatar: 'https://pbs.twimg.com/profile_images/1605577940795981824/79emv-5y_400x400.jpg',
+    bio: 'Startup accelerator. We back founders at the earliest stages.'
+  },
+  'BillGates': {
+    name: 'Bill Gates',
+    handle: '@BillGates',
+    avatar: 'https://pbs.twimg.com/profile_images/1884274381386625024/5unxp1hx_400x400.jpg',
+    bio: 'Co-chair of the Bill & Melinda Gates Foundation. Sharing things I\'m learning through my work.'
+  }
+};
+
+// Fetch tweets from Twitter/X using scraping approach
+app.post('/fetch-tweets', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { handles } = body; // Array of handles like ['sama', 'ycombinator', 'BillGates']
+
+    if (!handles || !Array.isArray(handles) || handles.length === 0) {
+      return c.json({ error: 'Handles array is required' }, 400);
+    }
+
+    const allTweets: Array<{
+      id: string;
+      content: string;
+      author: string;
+      handle: string;
+      avatar: string;
+      timestamp: string;
+      url: string;
+    }> = [];
+
+    // For each handle, fetch tweets using a public API or scraper
+    for (const handle of handles) {
+      const cleanHandle = handle.replace('@', '');
+      const accountInfo = TWITTER_ACCOUNTS[cleanHandle];
+      
+      if (!accountInfo) continue;
+
+      try {
+        // Use Nitter or similar public instance to fetch tweets
+        // Trying multiple Nitter instances as they can be unreliable
+        const nitterInstances = [
+          'nitter.poast.org',
+          'nitter.privacydev.net',
+          'nitter.woodland.cafe'
+        ];
+        
+        let tweets: Array<{id: string; content: string; timestamp: string}> = [];
+        
+        for (const instance of nitterInstances) {
+          try {
+            const response = await fetch(`https://${instance}/${cleanHandle}/rss`, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              }
+            });
+            
+            if (response.ok) {
+              const rssText = await response.text();
+              // Parse RSS to extract tweets
+              const tweetMatches = rssText.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<pubDate>([\s\S]*?)<\/pubDate>[\s\S]*?<\/item>/g);
+              
+              for (const match of tweetMatches) {
+                const content = match[1]
+                  .replace(/<!\[CDATA\[/g, '')
+                  .replace(/\]\]>/g, '')
+                  .replace(/&amp;/g, '&')
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"')
+                  .replace(/<[^>]*>/g, '')
+                  .trim();
+                
+                const url = match[2].trim();
+                const pubDate = match[3].trim();
+                const tweetId = url.split('/').pop() || `tweet-${Date.now()}`;
+                
+                if (content && content.length > 10) {
+                  tweets.push({
+                    id: tweetId,
+                    content,
+                    timestamp: pubDate
+                  });
+                }
+              }
+              
+              if (tweets.length > 0) break; // Success, stop trying other instances
+            }
+          } catch (instanceError) {
+            console.log(`Nitter instance ${instance} failed, trying next...`);
+            continue;
+          }
+        }
+        
+        // If Nitter failed, use fallback mock tweets for demo
+        if (tweets.length === 0) {
+          tweets = generateMockTweetsForUser(cleanHandle);
+        }
+        
+        // Add tweets with author info
+        for (const tweet of tweets.slice(0, 10)) { // Limit to 10 tweets per user
+          allTweets.push({
+            id: tweet.id,
+            content: tweet.content,
+            author: accountInfo.name,
+            handle: accountInfo.handle,
+            avatar: accountInfo.avatar,
+            timestamp: tweet.timestamp,
+            url: `https://twitter.com/${cleanHandle}/status/${tweet.id}`
+          });
+        }
+        
+      } catch (userError) {
+        console.error(`Error fetching tweets for ${handle}:`, userError);
+      }
+    }
+
+    return c.json({
+      success: true,
+      tweets: allTweets,
+      count: allTweets.length
+    });
+
+  } catch (error) {
+    console.error('Fetch tweets error:', error);
+    return c.json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+// Generate mock tweets for demo when real fetching fails
+function generateMockTweetsForUser(handle: string): Array<{id: string; content: string; timestamp: string}> {
+  const now = new Date();
+  const mockTweets: Record<string, Array<{content: string}>> = {
+    'sama': [
+      { content: "GPT-5 is our most capable model yet. The improvements in reasoning and reliability are extraordinary. Excited for everyone to try it." },
+      { content: "AI safety isn't just about preventing harm—it's about ensuring these systems benefit everyone. That's what drives us at OpenAI every day." },
+      { content: "The pace of AI progress continues to accelerate. What took us 2 years now takes 6 months. Important to stay focused on getting it right." },
+      { content: "Great conversations at Davos about AI governance. The world is starting to take this seriously. Much more work to do." },
+      { content: "Sora is now available to all ChatGPT Plus users. Can't wait to see what people create with it." },
+      { content: "AGI is closer than most people think, but the path there matters as much as the destination. We're committed to doing this responsibly." },
+      { content: "The next few years will see AI transform education, healthcare, and scientific research in ways we're only beginning to imagine." }
+    ],
+    'ycombinator': [
+      { content: "Applications for YC Summer 2026 batch are now open. We've funded 5,000+ startups including Airbnb, Stripe, DoorDash. Apply now." },
+      { content: "The best time to start a startup is when you have an idea you can't stop thinking about. Don't wait for the perfect moment." },
+      { content: "AI startups raised $42B last year. But the real opportunity isn't in building models—it's in applying them to real problems." },
+      { content: "New essay: 'Why the best founders are slightly delusional.' The willingness to attempt the impossible is a feature, not a bug." },
+      { content: "Startup School is free and always will be. 400,000+ founders have gone through it. Start here: startupschool.org" },
+      { content: "The companies that will define the next decade are being started right now. Many by people who don't yet know they're founders." },
+      { content: "Founder tip: Your first 10 customers matter more than your next 10,000. Talk to them constantly. Build what they need." }
+    ],
+    'BillGates': [
+      { content: "AI will be the most transformative technology of our lifetimes. I've seen few innovations with this much potential to improve lives globally." },
+      { content: "Just returned from Africa. The progress on malaria prevention is remarkable—cases down 40% since 2000. But we can't let up now." },
+      { content: "Climate change and global health are connected in ways most people don't realize. Rising temperatures spread disease vectors to new regions." },
+      { content: "Reading recommendation: 'The Coming Wave' by Mustafa Suleyman. Essential reading on AI's potential and risks. Couldn't put it down." },
+      { content: "Nuclear power has to be part of the climate solution. TerraPower is making progress on next-gen reactors that are safer and produce less waste." },
+      { content: "Education is still the best investment we can make. AI tutoring could give every student access to personalized learning. Game-changing." },
+      { content: "The foundation is increasing our commitment to pandemic preparedness. COVID taught us we weren't ready. We have to do better." }
+    ]
+  };
+
+  const userTweets = mockTweets[handle] || [];
+  return userTweets.map((tweet, idx) => ({
+    id: `mock-${handle}-${Date.now()}-${idx}`,
+    content: tweet.content,
+    timestamp: new Date(now.getTime() - idx * 3600000).toISOString() // Stagger by hours
+  }));
+}
+
+// Filter tweets using DeepSeek LLM
+app.post('/filter-tweets', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { tweets, prompt } = body;
+
+    if (!tweets || !Array.isArray(tweets) || tweets.length === 0) {
+      return c.json({ error: 'Tweets array is required' }, 400);
+    }
+
+    if (!prompt || typeof prompt !== 'string') {
+      return c.json({ error: 'Prompt is required' }, 400);
+    }
+
+    // Prepare tweets for analysis
+    const tweetsForAnalysis = tweets.map((t: { id: string; content: string; author: string }, idx: number) => 
+      `[${idx}] @${t.author}: "${t.content}"`
+    ).join('\n\n');
+
+    const filterPrompt = `You are a content relevance filter. Given a user's topic of interest and a list of tweets, identify which tweets are relevant to the topic.
+
+USER'S TOPIC OF INTEREST: "${prompt}"
+
+TWEETS TO ANALYZE:
+${tweetsForAnalysis}
+
+INSTRUCTIONS:
+- Analyze each tweet for relevance to the user's topic
+- A tweet is relevant if it discusses, mentions, or relates to the topic directly or indirectly
+- Be inclusive - if there's a reasonable connection, include it
+- Return ONLY a JSON array of the INDEX NUMBERS of relevant tweets
+- Example response: [0, 2, 5, 7]
+- If no tweets are relevant, return: []
+
+IMPORTANT: Return ONLY the JSON array, nothing else.`;
+
+    try {
+      const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'user', content: filterPrompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 500
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('DeepSeek API error:', response.status, errorText);
+        // Fallback: return all tweets as relevant
+        return c.json({
+          success: true,
+          filteredTweets: tweets,
+          relevantIndices: tweets.map((_: unknown, idx: number) => idx),
+          fallback: true
+        });
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim() || '[]';
+      
+      // Parse the response to get relevant indices
+      let relevantIndices: number[] = [];
+      try {
+        // Clean the response
+        const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        relevantIndices = JSON.parse(cleanedContent);
+        
+        if (!Array.isArray(relevantIndices)) {
+          relevantIndices = [];
+        }
+      } catch (parseError) {
+        console.error('Failed to parse DeepSeek response:', content);
+        // Extract numbers from the response as fallback
+        const numbers = content.match(/\d+/g);
+        relevantIndices = numbers ? numbers.map(Number) : [];
+      }
+
+      // Filter tweets based on relevant indices
+      const filteredTweets = relevantIndices
+        .filter((idx: number) => idx >= 0 && idx < tweets.length)
+        .map((idx: number) => tweets[idx]);
+
+      return c.json({
+        success: true,
+        filteredTweets,
+        relevantIndices,
+        totalAnalyzed: tweets.length
+      });
+
+    } catch (apiError) {
+      console.error('DeepSeek API call failed:', apiError);
+      // Fallback: return all tweets
+      return c.json({
+        success: true,
+        filteredTweets: tweets,
+        relevantIndices: tweets.map((_: unknown, idx: number) => idx),
+        fallback: true
+      });
+    }
+
+  } catch (error) {
+    console.error('Filter tweets error:', error);
+    return c.json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+// Get available Twitter accounts
+app.get('/twitter-accounts', (c) => {
+  const accounts = Object.entries(TWITTER_ACCOUNTS).map(([key, value]) => ({
+    id: key,
+    ...value
+  }));
+  return c.json({ accounts });
 });
 
 export default app;

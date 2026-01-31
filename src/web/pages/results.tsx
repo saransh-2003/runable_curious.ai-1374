@@ -1,14 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  tweets,
-  twitterUsers,
   techCrunchArticles,
   espnSportsArticles,
   reutersWorldArticles,
-  type Tweet,
   type RSSArticle,
-  type TwitterUser,
 } from "../data/mockData";
 
 interface User {
@@ -22,12 +18,22 @@ interface CuratorState {
   selectedRSS: string[];
 }
 
-interface GeminiArticle {
+interface DeepSeekArticle {
   id: string;
   title: string;
   summary: string;
   source: string;
   publishedDate: string;
+  url: string;
+}
+
+interface FetchedTweet {
+  id: string;
+  content: string;
+  author: string;
+  handle: string;
+  avatar: string;
+  timestamp: string;
   url: string;
 }
 
@@ -43,12 +49,13 @@ interface NewsCluster {
   mostRecentTime: string;
   articleCount: number;
   sources: Array<{
-    type: "twitter" | "rss" | "gemini";
+    type: "twitter" | "rss" | "deepseek";
     name: string;
     icon: string;
+    url?: string;
   }>;
   items: Array<{
-    type: "tweet" | "article" | "gemini";
+    type: "tweet" | "article" | "deepseek";
     title: string;
     content: string;
     source: string;
@@ -64,7 +71,7 @@ const TOPIC_KEYWORDS: Record<string, string[]> = {
     "ai",
     "artificial intelligence",
     "gpt",
-    "gemini",
+    "deepseek",
     "llama",
     "openai",
     "anthropic",
@@ -264,10 +271,6 @@ const getTimeAgo = (dateString: string): string => {
   return "Just now";
 };
 
-const getUserFromHandle = (handle: string): TwitterUser | undefined => {
-  return twitterUsers.find((u) => u.handle === handle);
-};
-
 const getRSSArticles = (sourceName: string): RSSArticle[] => {
   switch (sourceName) {
     case "TechCrunch AI":
@@ -292,8 +295,8 @@ const generateCombinedSummary = (items: NewsCluster["items"]): string => {
 
   // Prioritize articles over tweets for main content
   const sortedItems = [...items].sort((a, b) => {
-    if (a.type === "article" || a.type === "gemini") return -1;
-    if (b.type === "article" || b.type === "gemini") return 1;
+    if (a.type === "article" || a.type === "deepseek") return -1;
+    if (b.type === "article" || b.type === "deepseek") return 1;
     return 0;
   });
 
@@ -311,31 +314,22 @@ const generateCombinedSummary = (items: NewsCluster["items"]): string => {
   return summaryParts.join(". ") + (summaryParts.length > 0 ? "." : "");
 };
 
-// Generate natural narration script
+// Generate narration script - reads exactly what's shown on screen (max 480 chars for Sarvam limit)
 const generateNarrationScript = (cluster: NewsCluster): string => {
-  const topicLabel = TOPIC_CONFIG[cluster.topic]?.label || cluster.topicLabel;
-  const headline = cluster.mainHeadline || cluster.items[0]?.title || `Latest ${topicLabel} News`;
-
-  // Get a concise summary (max 3 sentences)
-  const summaryContent = cluster.mainSummary || cluster.items[0]?.content || "";
-  const sentences = summaryContent.split(/[.!?]+/).filter((s) => s.trim().length > 10);
-  const briefSummary = sentences.slice(0, 3).join(". ").trim();
-
-  // Format sources list naturally
-  const sourceNames = cluster.sources.map((s) => {
-    if (s.type === "twitter") return s.name.replace("@", "");
-    if (s.type === "gemini") return "Google AI Search";
-    return s.name;
-  });
-
-  const sourcesText =
-    sourceNames.length === 1
-      ? sourceNames[0]
-      : sourceNames.length === 2
-      ? `${sourceNames[0]} and ${sourceNames[1]}`
-      : `${sourceNames.slice(0, -1).join(", ")}, and ${sourceNames[sourceNames.length - 1]}`;
-
-  return `Here's the latest on ${topicLabel}. ${headline}. ${briefSummary}${briefSummary.endsWith(".") ? "" : "."} This story was reported by ${sourcesText}.`;
+  const headline = cluster.mainHeadline || cluster.items[0]?.title || "";
+  
+  // Use the exact same text that's displayed on screen
+  const displayedSummary = cluster.combinedSummary || cluster.mainSummary || cluster.items[0]?.content || "";
+  
+  // Combine headline and summary, same as what user sees
+  let narration = headline ? `${headline}. ${displayedSummary}` : displayedSummary;
+  
+  // Truncate to fit Sarvam's 500 char limit
+  if (narration.length > 480) {
+    narration = narration.substring(0, 477) + "...";
+  }
+  
+  return narration;
 };
 
 function ResultsPage() {
@@ -353,10 +347,10 @@ function ResultsPage() {
   const [askInput, setAskInput] = useState("");
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
-  const fetchGeminiNews = useCallback(async (query: string): Promise<GeminiArticle[]> => {
+  const fetchDeepSeekNews = useCallback(async (query: string): Promise<DeepSeekArticle[]> => {
     try {
-      console.log('Making API call to /api/gemini-news with query:', query);
-      const response = await fetch("/api/gemini-news", {
+      console.log('Making API call to /api/deepseek-news with query:', query);
+      const response = await fetch("/api/deepseek-news", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
@@ -365,25 +359,77 @@ function ResultsPage() {
       console.log('API response status:', response.status, response.ok);
       
       if (!response.ok) {
-        console.error("Gemini API error - response not ok");
+        console.error("DeepSeek API error - response not ok");
         return [];
       }
 
       const data = await response.json();
-      console.log('API response data:', data);
+      console.log('DeepSeek returned', data.articles?.length, 'articles');
       return data.articles || [];
     } catch (error) {
-      console.error("Failed to fetch Gemini news:", error);
+      console.error("Failed to fetch DeepSeek news:", error);
       return [];
+    }
+  }, []);
+
+  // Fetch tweets from selected Twitter accounts
+  const fetchTweets = useCallback(async (handles: string[]): Promise<FetchedTweet[]> => {
+    if (handles.length === 0) return [];
+    
+    try {
+      console.log('Fetching tweets for handles:', handles);
+      const response = await fetch("/api/fetch-tweets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handles }),
+      });
+
+      if (!response.ok) {
+        console.error("Failed to fetch tweets");
+        return [];
+      }
+
+      const data = await response.json();
+      console.log('Fetched tweets:', data.tweets?.length);
+      return data.tweets || [];
+    } catch (error) {
+      console.error("Error fetching tweets:", error);
+      return [];
+    }
+  }, []);
+
+  // Filter tweets using DeepSeek
+  const filterTweetsWithAI = useCallback(async (tweets: FetchedTweet[], prompt: string): Promise<FetchedTweet[]> => {
+    if (tweets.length === 0) return [];
+    
+    try {
+      console.log('Filtering tweets with DeepSeek for prompt:', prompt);
+      const response = await fetch("/api/filter-tweets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tweets, prompt }),
+      });
+
+      if (!response.ok) {
+        console.error("Failed to filter tweets");
+        return tweets; // Return all tweets as fallback
+      }
+
+      const data = await response.json();
+      console.log('Filtered tweets:', data.filteredTweets?.length, 'out of', tweets.length);
+      return data.filteredTweets || [];
+    } catch (error) {
+      console.error("Error filtering tweets:", error);
+      return tweets;
     }
   }, []);
 
   const clusterNews = useCallback(
     (
       prompt: string,
-      selectedTwitterHandles: string[],
+      filteredTweets: FetchedTweet[],
       selectedRSSNames: string[],
-      geminiArticles: GeminiArticle[]
+      deepseekArticles: DeepSeekArticle[]
     ): NewsCluster[] => {
       const topicGroups: Record<string, NewsCluster> = {};
 
@@ -408,46 +454,36 @@ function ResultsPage() {
         }
       };
 
-      // Filter and add relevant tweets
-      selectedTwitterHandles.forEach((handle) => {
-        const user = getUserFromHandle(handle);
-        if (!user) return;
+      // Add filtered tweets (already filtered by DeepSeek)
+      filteredTweets.forEach((tweet) => {
+        const topic = detectTopic(tweet.content);
+        ensureTopicGroup(topic, tweet.timestamp);
 
-        const userTweets = tweets.filter((t) => {
-          const twitterUser = twitterUsers.find((u) => u.id === t.userId);
-          return twitterUser?.handle === handle;
+        topicGroups[topic].items.push({
+          type: "tweet",
+          title: tweet.content.slice(0, 60) + "...",
+          content: tweet.content,
+          source: tweet.author,
+          sourceHandle: tweet.handle,
+          url: tweet.url,
+          timestamp: tweet.timestamp,
         });
 
-        userTweets.forEach((tweet) => {
-          if (!isRelevantToPrompt(tweet.content, prompt)) return;
+        topicGroups[topic].articleCount++;
 
-          const topic = detectTopic(tweet.content);
-          ensureTopicGroup(topic, tweet.createdAt);
+        // Update most recent time
+        if (new Date(tweet.timestamp) > new Date(topicGroups[topic].mostRecentTime)) {
+          topicGroups[topic].mostRecentTime = tweet.timestamp;
+        }
 
-          topicGroups[topic].items.push({
-            type: "tweet",
-            title: tweet.content.slice(0, 60) + "...",
-            content: tweet.content,
-            source: user.name,
-            sourceHandle: user.handle,
-            timestamp: tweet.createdAt,
+        if (!topicGroups[topic].sources.find((s) => s.name === tweet.handle)) {
+          topicGroups[topic].sources.push({
+            type: "twitter",
+            name: tweet.handle,
+            icon: "twitter",
+            url: tweet.url,
           });
-
-          topicGroups[topic].articleCount++;
-
-          // Update most recent time
-          if (new Date(tweet.createdAt) > new Date(topicGroups[topic].mostRecentTime)) {
-            topicGroups[topic].mostRecentTime = tweet.createdAt;
-          }
-
-          if (!topicGroups[topic].sources.find((s) => s.name === user.handle)) {
-            topicGroups[topic].sources.push({
-              type: "twitter",
-              name: user.handle,
-              icon: "twitter",
-            });
-          }
-        });
+        }
       });
 
       // Filter and add relevant RSS articles
@@ -493,41 +529,81 @@ function ResultsPage() {
         });
       });
 
-      // Add Gemini articles
-      console.log('Processing Gemini articles:', geminiArticles.length);
-      geminiArticles.forEach((article, idx) => {
-        const topic = detectTopic(article.title + " " + article.summary);
-        console.log(`Gemini article ${idx}: topic=${topic}, title=${article.title.substring(0, 50)}`);
-        ensureTopicGroup(topic, article.publishedDate);
+      // Add DeepSeek articles
+      // When only DeepSeek articles (no tweets/RSS), show each as individual card
+      const onlyDeepSeekArticles = filteredTweets.length === 0 && selectedRSSNames.length === 0;
+      
+      console.log('Processing DeepSeek articles:', deepseekArticles.length, 'onlyDeepSeek:', onlyDeepSeekArticles);
+      
+      deepseekArticles.forEach((article, idx) => {
+        // If only DeepSeek articles, create individual clusters for each article
+        const topic = onlyDeepSeekArticles 
+          ? `deepseek-article-${idx}` 
+          : detectTopic(article.title + " " + article.summary);
+        
+        console.log(`DeepSeek article ${idx}: topic=${topic}, title=${article.title.substring(0, 50)}`);
+        
+        const config = onlyDeepSeekArticles 
+          ? { label: article.source, color: "text-violet-700", bg: "bg-violet-50", border: "border-violet-200" }
+          : (TOPIC_CONFIG[topic] || TOPIC_CONFIG.general);
+        
+        if (!topicGroups[topic]) {
+          topicGroups[topic] = {
+            id: `cluster-${topic}-${Date.now()}-${idx}`,
+            topic,
+            topicLabel: config.label,
+            mainHeadline: article.title,
+            mainSummary: article.summary,
+            combinedSummary: "",
+            mainImage: `https://picsum.photos/seed/${article.title.slice(0, 10)}${idx}/800/450`,
+            timestamp: article.publishedDate,
+            mostRecentTime: article.publishedDate,
+            articleCount: 1,
+            sources: [{
+              type: "deepseek" as const,
+              name: article.source,
+              icon: "deepseek",
+              url: article.url,
+            }],
+            items: [{
+              type: "deepseek" as const,
+              title: article.title,
+              content: article.summary,
+              source: article.source,
+              url: article.url,
+              timestamp: article.publishedDate,
+            }],
+          };
+        } else {
+          // Clustering mode - add to existing topic group
+          if (!topicGroups[topic].mainHeadline || topicGroups[topic].items.every((i) => i.type === "tweet")) {
+            topicGroups[topic].mainHeadline = article.title;
+            topicGroups[topic].mainSummary = article.summary;
+          }
 
-        // Use Gemini article as main if no main exists or only tweets exist
-        if (!topicGroups[topic].mainHeadline || topicGroups[topic].items.every((i) => i.type === "tweet")) {
-          topicGroups[topic].mainHeadline = article.title;
-          topicGroups[topic].mainSummary = article.summary;
-        }
-
-        topicGroups[topic].items.push({
-          type: "gemini",
-          title: article.title,
-          content: article.summary,
-          source: article.source,
-          url: article.url,
-          timestamp: article.publishedDate,
-        });
-
-        topicGroups[topic].articleCount++;
-
-        // Update most recent time
-        if (new Date(article.publishedDate) > new Date(topicGroups[topic].mostRecentTime)) {
-          topicGroups[topic].mostRecentTime = article.publishedDate;
-        }
-
-        if (!topicGroups[topic].sources.find((s) => s.name === "AI Search")) {
-          topicGroups[topic].sources.push({
-            type: "gemini",
-            name: "AI Search",
-            icon: "gemini",
+          topicGroups[topic].items.push({
+            type: "deepseek",
+            title: article.title,
+            content: article.summary,
+            source: article.source,
+            url: article.url,
+            timestamp: article.publishedDate,
           });
+
+          topicGroups[topic].articleCount++;
+
+          if (new Date(article.publishedDate) > new Date(topicGroups[topic].mostRecentTime)) {
+            topicGroups[topic].mostRecentTime = article.publishedDate;
+          }
+
+          if (!topicGroups[topic].sources.find((s) => s.name === article.source)) {
+            topicGroups[topic].sources.push({
+              type: "deepseek",
+              name: article.source,
+              icon: "deepseek",
+              url: article.url,
+            });
+          }
         }
       });
 
@@ -569,26 +645,39 @@ function ResultsPage() {
     const loadNews = async () => {
       setLoading(true);
 
-      // Fetch from Gemini API
-      console.log('Fetching Gemini news for prompt:', curatorState.prompt);
-      const geminiArticles = await fetchGeminiNews(curatorState.prompt);
-      console.log('Gemini articles received:', geminiArticles.length, geminiArticles);
+      // Fetch from DeepSeek API (always)
+      console.log('Fetching DeepSeek news for prompt:', curatorState.prompt);
+      const deepseekArticles = await fetchDeepSeekNews(curatorState.prompt);
+      console.log('DeepSeek articles received:', deepseekArticles.length);
+
+      // Fetch and filter tweets if Twitter accounts are selected
+      let filteredTweets: FetchedTweet[] = [];
+      if (curatorState.selectedTwitter.length > 0) {
+        console.log('Fetching tweets for:', curatorState.selectedTwitter);
+        const allTweets = await fetchTweets(curatorState.selectedTwitter);
+        console.log('All tweets fetched:', allTweets.length);
+        
+        if (allTweets.length > 0) {
+          filteredTweets = await filterTweetsWithAI(allTweets, curatorState.prompt);
+          console.log('Tweets after DeepSeek filtering:', filteredTweets.length);
+        }
+      }
 
       // Cluster all news
       const newClusters = clusterNews(
         curatorState.prompt,
-        curatorState.selectedTwitter,
+        filteredTweets,
         curatorState.selectedRSS,
-        geminiArticles
+        deepseekArticles
       );
-      console.log('Clusters created:', newClusters.length, newClusters);
+      console.log('Clusters created:', newClusters.length);
 
       setClusters(newClusters);
       setLoading(false);
     };
 
     loadNews();
-  }, [curatorState, fetchGeminiNews, clusterNews]);
+  }, [curatorState, fetchDeepSeekNews, fetchTweets, filterTweetsWithAI, clusterNews]);
 
   const getInitial = (email: string) => {
     return email.charAt(0).toUpperCase();
@@ -1369,33 +1458,51 @@ function ResultsPage() {
                           <span className="text-xs text-gray-400 mr-2">Sources:</span>
                           <div className="flex items-center gap-2 flex-wrap">
                             {cluster.sources.map((source, i) => (
-                              <span
-                                key={i}
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                                  source.type === "twitter"
-                                    ? "bg-sky-50 text-sky-700"
-                                    : source.type === "rss"
-                                    ? "bg-orange-50 text-orange-700"
-                                    : "bg-violet-50 text-violet-700"
-                                }`}
-                              >
-                                {source.type === "twitter" && (
+                              source.type === "twitter" && source.url ? (
+                                <a
+                                  key={i}
+                                  href={source.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors cursor-pointer"
+                                >
                                   <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                                   </svg>
-                                )}
-                                {source.type === "rss" && (
-                                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M6.18 15.64a2.18 2.18 0 1 1 0 4.36 2.18 2.18 0 0 1 0-4.36zM4 4.44A15.56 15.56 0 0 1 19.56 20h-2.83A12.73 12.73 0 0 0 4 7.27V4.44zm0 5.66a9.9 9.9 0 0 1 9.9 9.9h-2.83A7.07 7.07 0 0 0 4 12.93v-2.83z" />
+                                  {source.name}
+                                  <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                   </svg>
-                                )}
-                                {source.type === "gemini" && (
-                                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                                  </svg>
-                                )}
-                                {source.name}
-                              </span>
+                                </a>
+                              ) : (
+                                <span
+                                  key={i}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                    source.type === "twitter"
+                                      ? "bg-sky-50 text-sky-700"
+                                      : source.type === "rss"
+                                      ? "bg-orange-50 text-orange-700"
+                                      : "bg-violet-50 text-violet-700"
+                                  }`}
+                                >
+                                  {source.type === "twitter" && (
+                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                                    </svg>
+                                  )}
+                                  {source.type === "rss" && (
+                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                      <path d="M6.18 15.64a2.18 2.18 0 1 1 0 4.36 2.18 2.18 0 0 1 0-4.36zM4 4.44A15.56 15.56 0 0 1 19.56 20h-2.83A12.73 12.73 0 0 0 4 7.27V4.44zm0 5.66a9.9 9.9 0 0 1 9.9 9.9h-2.83A7.07 7.07 0 0 0 4 12.93v-2.83z" />
+                                    </svg>
+                                  )}
+                                  {source.type === "deepseek" && (
+                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                      <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                                    </svg>
+                                  )}
+                                  {source.name}
+                                </span>
+                              )
                             ))}
                           </div>
                         </div>

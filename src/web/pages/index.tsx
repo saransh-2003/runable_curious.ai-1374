@@ -23,7 +23,7 @@ const features = [
       </svg>
     ),
     title: "AI-Powered Curation",
-    description: "Gemini analyzes and ranks stories by relevance. Only the signal, never the noise.",
+    description: "DeepSeek AI analyzes and ranks stories by relevance. Only the signal, never the noise.",
   },
   {
     icon: (
@@ -158,7 +158,7 @@ function Index() {
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-sm font-medium text-gray-700">Powered by Gemini AI</span>
+            <span className="text-sm font-medium text-gray-700">Powered by DeepSeek AI</span>
           </div>
 
           {/* Headline */}
