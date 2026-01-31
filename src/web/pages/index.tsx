@@ -1,4 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link } from "wouter";
+
+interface User {
+  email: string;
+  createdAt: string;
+}
 
 const features = [
   {
@@ -41,10 +47,19 @@ const features = [
 
 function Index() {
   const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     setMounted(true);
+    const userData = localStorage.getItem("curious_user");
+    if (userData) {
+      setUser(JSON.parse(userData));
+    }
   }, []);
+
+  const getInitial = (email: string) => {
+    return email.charAt(0).toUpperCase();
+  };
 
   return (
     <div className="min-h-screen bg-[#faf9f7] font-['Sora',sans-serif] overflow-hidden">
@@ -81,12 +96,31 @@ function Index() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors">
-            Login
-          </button>
-          <button className="px-5 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 transition-all hover:shadow-lg hover:shadow-gray-900/20">
-            Sign Up
-          </button>
+          {user ? (
+            <Link href="/profile">
+              <div className="flex items-center gap-3 cursor-pointer group">
+                <span className="hidden md:block text-sm font-medium text-gray-700 group-hover:text-gray-900 transition-colors max-w-[150px] truncate">
+                  {user.email}
+                </span>
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-semibold text-sm ring-2 ring-white shadow-md group-hover:shadow-lg group-hover:shadow-indigo-600/20 transition-all">
+                  {getInitial(user.email)}
+                </div>
+              </div>
+            </Link>
+          ) : (
+            <>
+              <Link href="/login">
+                <span className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors cursor-pointer">
+                  Login
+                </span>
+              </Link>
+              <Link href="/signup">
+                <span className="px-5 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 transition-all hover:shadow-lg hover:shadow-gray-900/20 cursor-pointer">
+                  Sign Up
+                </span>
+              </Link>
+            </>
+          )}
         </div>
       </nav>
 
@@ -132,21 +166,20 @@ function Index() {
               mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
             }`}
           >
-            <a
-              href="#signup"
-              className="group inline-flex items-center gap-2 px-7 py-4 text-base font-semibold text-white rounded-full transition-all bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-xl hover:shadow-indigo-600/30 hover:-translate-y-0.5"
-            >
-              Get Started
-              <svg 
-                className="w-4 h-4 transition-transform group-hover:translate-x-1" 
-                fill="none" 
-                viewBox="0 0 24 24" 
-                stroke="currentColor" 
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-              </svg>
-            </a>
+            <Link href="/signup">
+              <span className="group inline-flex items-center gap-2 px-7 py-4 text-base font-semibold text-white rounded-full transition-all bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-xl hover:shadow-indigo-600/30 hover:-translate-y-0.5 cursor-pointer">
+                Get Started
+                <svg 
+                  className="w-4 h-4 transition-transform group-hover:translate-x-1" 
+                  fill="none" 
+                  viewBox="0 0 24 24" 
+                  stroke="currentColor" 
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                </svg>
+              </span>
+            </Link>
             <span className="text-sm text-gray-500">Free to start • No credit card required</span>
           </div>
         </div>
