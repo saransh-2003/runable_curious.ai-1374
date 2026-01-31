@@ -131,6 +131,9 @@ function ResultsPage() {
   const [loading, setLoading] = useState(true);
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const [askInput, setAskInput] = useState("");
 
   const fetchGeminiNews = useCallback(async (query: string): Promise<GeminiArticle[]> => {
@@ -359,19 +362,98 @@ function ResultsPage() {
     });
   };
 
-  const handleSpeak = (id: string, text: string) => {
+  const generateNarrationScript = (cluster: NewsCluster): string => {
+    const headline = cluster.mainHeadline || cluster.items[0]?.title || `Latest ${cluster.topic} News`;
+    const summary = cluster.mainSummary || cluster.items[0]?.content || '';
+    const sourcesList = cluster.sources.map(s => s.name).join(', ');
+    
+    return `${headline}. ${summary}. This story was reported by ${sourcesList}.`;
+  };
+
+  const handleSpeak = async (id: string, cluster: NewsCluster) => {
+    // If currently speaking this item, stop it
     if (speakingId === id) {
-      window.speechSynthesis.cancel();
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        setCurrentAudio(null);
+      }
       setSpeakingId(null);
       return;
     }
 
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    utterance.onend = () => setSpeakingId(null);
-    window.speechSynthesis.speak(utterance);
-    setSpeakingId(id);
+    // Stop any currently playing audio
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      setCurrentAudio(null);
+    }
+    setSpeakingId(null);
+    setAudioError(null);
+
+    // Generate narration script
+    const narrationText = generateNarrationScript(cluster);
+
+    // Set loading state
+    setLoadingAudioId(id);
+
+    try {
+      const response = await fetch('/api/sarvam-tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: narrationText }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate audio');
+      }
+
+      const data = await response.json();
+
+      if (!data.audio) {
+        throw new Error('No audio received');
+      }
+
+      // Decode base64 and create audio element
+      const audioBlob = base64ToBlob(data.audio, 'audio/wav');
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        setSpeakingId(null);
+        setCurrentAudio(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onerror = () => {
+        setAudioError('Failed to play audio');
+        setSpeakingId(null);
+        setCurrentAudio(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      setCurrentAudio(audio);
+      setSpeakingId(id);
+      await audio.play();
+
+    } catch (error) {
+      console.error('TTS error:', error);
+      setAudioError('Failed to generate audio. Please try again.');
+      setTimeout(() => setAudioError(null), 3000);
+    } finally {
+      setLoadingAudioId(null);
+    }
+  };
+
+  // Helper function to convert base64 to Blob
+  const base64ToBlob = (base64: string, mimeType: string): Blob => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
   };
 
   if (!user || !curatorState) {
@@ -388,6 +470,28 @@ function ResultsPage() {
           backgroundSize: "32px 32px",
         }}
       />
+
+      {/* Error Toast */}
+      {audioError && (
+        <div className="fixed top-4 right-4 z-[100] animate-in slide-in-from-top fade-in duration-300">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
+            <svg
+              className="w-5 h-5 text-red-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+              />
+            </svg>
+            <span className="text-sm font-medium">{audioError}</span>
+          </div>
+        </div>
+      )}
 
       {/* Navbar */}
       <nav
@@ -747,19 +851,40 @@ function ResultsPage() {
 
                       {/* Listen Button */}
                       <button
-                        onClick={() =>
-                          handleSpeak(
-                            cluster.id,
-                            `${cluster.mainHeadline}. ${cluster.mainSummary || cluster.items[0]?.content}`
-                          )
-                        }
+                        onClick={() => handleSpeak(cluster.id, cluster)}
+                        disabled={loadingAudioId === cluster.id}
                         className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all mb-4 ${
                           speakingId === cluster.id
                             ? "bg-indigo-600 text-white"
+                            : loadingAudioId === cluster.id
+                            ? "bg-indigo-100 text-indigo-600 cursor-wait"
                             : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                         }`}
                       >
-                        {speakingId === cluster.id ? (
+                        {loadingAudioId === cluster.id ? (
+                          <>
+                            <svg
+                              className="w-4 h-4 animate-spin"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              />
+                            </svg>
+                            Generating...
+                          </>
+                        ) : speakingId === cluster.id ? (
                           <>
                             <svg
                               className="w-4 h-4 animate-pulse"

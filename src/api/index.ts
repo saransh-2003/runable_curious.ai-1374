@@ -136,4 +136,62 @@ IMPORTANT: Return ONLY the JSON array, no markdown formatting, no code blocks, j
   }
 });
 
+// Sarvam AI Text-to-Speech API endpoint
+app.post('/sarvam-tts', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { text } = body;
+
+    if (!text || typeof text !== 'string') {
+      return c.json({ error: 'Text is required' }, 400);
+    }
+
+    const SARVAM_API_KEY = 'sk_i8amxjz9_MdARpKfvIofS4VI6vXSya5Lq';
+
+    const response = await fetch('https://api.sarvam.ai/text-to-speech', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-subscription-key': SARVAM_API_KEY,
+      },
+      body: JSON.stringify({
+        inputs: [text],
+        target_language_code: 'en-IN',
+        speaker: 'meera',
+        pace: 1.3,
+        speech_sample_rate: 22050,
+        enable_preprocessing: true,
+        model: 'bulbul:v2',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Sarvam TTS API error:', errorText);
+      return c.json({ error: 'Failed to generate audio', details: errorText }, 500);
+    }
+
+    const data = await response.json();
+
+    // Sarvam returns audio as base64 in the audios array
+    const audioBase64 = data?.audios?.[0];
+
+    if (!audioBase64) {
+      return c.json({ error: 'No audio in response' }, 500);
+    }
+
+    return c.json({
+      success: true,
+      audio: audioBase64,
+    });
+
+  } catch (error) {
+    console.error('Sarvam TTS API error:', error);
+    return c.json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
 export default app;
