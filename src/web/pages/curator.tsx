@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { twitterUsers } from "../data/mockData";
 
 interface User {
   email: string;
@@ -9,8 +10,10 @@ interface User {
 interface TwitterAccount {
   id: string;
   handle: string;
+  name: string;
   avatar: string;
   bio: string;
+  followers: number;
   selected: boolean;
 }
 
@@ -21,29 +24,16 @@ interface RSSSource {
   selected: boolean;
 }
 
-const twitterAccounts: TwitterAccount[] = [
-  {
-    id: "1",
-    handle: "@TechGuru_AI",
-    avatar: "T",
-    bio: "AI researcher and tech enthusiast",
-    selected: false,
-  },
-  {
-    id: "2",
-    handle: "@AINewsDaily",
-    avatar: "A",
-    bio: "Your daily dose of AI updates",
-    selected: false,
-  },
-  {
-    id: "3",
-    handle: "@GlobalPulse",
-    avatar: "G",
-    bio: "World news and analysis",
-    selected: false,
-  },
-];
+// Initialize Twitter accounts from mock data
+const initialTwitterAccounts: TwitterAccount[] = twitterUsers.map((user) => ({
+  id: user.id,
+  handle: user.handle,
+  name: user.name,
+  avatar: user.avatar,
+  bio: user.bio,
+  followers: user.followers,
+  selected: false,
+}));
 
 const rssSources: RSSSource[] = [
   {
@@ -66,12 +56,23 @@ const rssSources: RSSSource[] = [
   },
 ];
 
+// Suggestion chips that match our mock data topics
 const suggestionChips = [
-  "AI startup funding news",
-  "Cricket highlights",
-  "Geopolitics analysis",
-  "Health & wellness",
+  "AI developments",
+  "Cricket news",
+  "Global geopolitics",
+  "Health tech",
 ];
+
+const formatFollowers = (count: number): string => {
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1)}M`;
+  }
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K`;
+  }
+  return count.toString();
+};
 
 function CuratorPage() {
   const [mounted, setMounted] = useState(false);
@@ -80,8 +81,10 @@ function CuratorPage() {
   const [prompt, setPrompt] = useState("");
   const [showTwitterModal, setShowTwitterModal] = useState(false);
   const [showRSSModal, setShowRSSModal] = useState(false);
-  const [selectedTwitter, setSelectedTwitter] = useState<TwitterAccount[]>(twitterAccounts);
+  const [selectedTwitter, setSelectedTwitter] = useState<TwitterAccount[]>(initialTwitterAccounts);
   const [selectedRSS, setSelectedRSS] = useState<RSSSource[]>(rssSources);
+  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -134,17 +137,36 @@ function CuratorPage() {
 
   const handleChipClick = (chip: string) => {
     setPrompt(chip);
+    setShowError(false);
+    setErrorMessage("");
+  };
+
+  const handlePromptChange = (value: string) => {
+    setPrompt(value);
+    if (value.trim().length > 0) {
+      setShowError(false);
+      setErrorMessage("");
+    }
   };
 
   const handleGenerate = () => {
+    if (!prompt.trim()) {
+      setShowError(true);
+      setErrorMessage("Please enter a topic or interest to generate your feed");
+      return;
+    }
+
     // Store state in localStorage for results page
     const curatorState = {
-      prompt,
+      prompt: prompt.trim(),
       selectedTwitter: selectedTwitterSources.map((acc) => acc.handle),
       selectedRSS: selectedRSSSources.map((source) => source.name),
     };
     localStorage.setItem("curator_state", JSON.stringify(curatorState));
-    setLocation("/results");
+    
+    // Navigate with URL search params
+    const encodedPrompt = encodeURIComponent(prompt.trim());
+    setLocation(`/results?prompt=${encodedPrompt}`);
   };
 
   if (!user) {
@@ -235,10 +257,14 @@ function CuratorPage() {
             <div className="relative">
               <textarea
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => handlePromptChange(e.target.value)}
                 placeholder="Tell me a topic, trend, or interest..."
                 rows={3}
-                className="w-full px-6 py-5 pr-16 bg-white border border-gray-200/80 rounded-2xl text-gray-900 placeholder-gray-400 text-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 shadow-lg shadow-gray-900/5 transition-all"
+                className={`w-full px-6 py-5 pr-16 bg-white border rounded-2xl text-gray-900 placeholder-gray-400 text-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 shadow-lg shadow-gray-900/5 transition-all ${
+                  showError
+                    ? "border-red-300 focus:ring-red-500/20 focus:border-red-400"
+                    : "border-gray-200/80"
+                }`}
               />
               <button
                 onClick={handleGenerate}
@@ -264,6 +290,26 @@ function CuratorPage() {
                 </svg>
               </button>
             </div>
+            
+            {/* Error message */}
+            {showError && (
+              <div className="mt-3 flex items-center gap-2 text-red-500 text-sm animate-in fade-in slide-in-from-top-1 duration-200">
+                <svg
+                  className="w-4 h-4 flex-shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                  />
+                </svg>
+                <span>{errorMessage}</span>
+              </div>
+            )}
           </div>
 
           {/* Suggestion Chips */}
@@ -276,12 +322,16 @@ function CuratorPage() {
               <button
                 key={chip}
                 onClick={() => handleChipClick(chip)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/80 backdrop-blur border border-gray-200/80 rounded-full text-sm font-medium text-gray-700 hover:border-indigo-300 hover:bg-indigo-50/50 hover:text-indigo-700 transition-all shadow-sm hover:shadow-md"
+                className={`inline-flex items-center gap-2 px-4 py-2.5 backdrop-blur border rounded-full text-sm font-medium transition-all shadow-sm hover:shadow-md ${
+                  prompt === chip
+                    ? "bg-indigo-50 border-indigo-300 text-indigo-700"
+                    : "bg-white/80 border-gray-200/80 text-gray-700 hover:border-indigo-300 hover:bg-indigo-50/50 hover:text-indigo-700"
+                }`}
                 style={{
                   animationDelay: `${index * 50}ms`,
                 }}
               >
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                <span className={`w-2 h-2 rounded-full ${prompt === chip ? "bg-indigo-500" : "bg-amber-400"}`} />
                 {chip}
               </button>
             ))}
@@ -314,6 +364,11 @@ function CuratorPage() {
                     </svg>
                   </div>
                   <span className="font-medium text-gray-800">X / Twitter</span>
+                  {selectedTwitterSources.length > 0 && (
+                    <span className="text-xs text-sky-600 bg-sky-50 px-2 py-0.5 rounded-full">
+                      {selectedTwitterSources.length} selected
+                    </span>
+                  )}
                 </div>
               </button>
 
@@ -333,6 +388,11 @@ function CuratorPage() {
                     </svg>
                   </div>
                   <span className="font-medium text-gray-800">RSS Feed</span>
+                  {selectedRSSSources.length > 0 && (
+                    <span className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                      {selectedRSSSources.length} selected
+                    </span>
+                  )}
                 </div>
               </button>
             </div>
@@ -341,9 +401,10 @@ function CuratorPage() {
             {hasSelectedSources && (
               <div className="mt-8 flex flex-wrap justify-center gap-2">
                 {selectedTwitterSources.map((acc) => (
-                  <span
+                  <button
                     key={acc.id}
-                    className="inline-flex items-center gap-2 pl-3 pr-2 py-1.5 bg-sky-50 text-sky-700 rounded-full text-sm font-medium border border-sky-200"
+                    onClick={() => removeTwitterSource(acc.id)}
+                    className="inline-flex items-center gap-2 pl-3 pr-2 py-1.5 bg-sky-50 text-sky-700 rounded-full text-sm font-medium border border-sky-200 hover:bg-sky-100 hover:border-sky-300 transition-all cursor-pointer group"
                   >
                     <svg
                       className="w-4 h-4"
@@ -353,12 +414,11 @@ function CuratorPage() {
                       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                     </svg>
                     {acc.handle}
-                    <button
-                      onClick={() => removeTwitterSource(acc.id)}
-                      className="w-5 h-5 rounded-full bg-sky-200 hover:bg-sky-300 flex items-center justify-center transition-colors"
+                    <span
+                      className="w-5 h-5 rounded-full bg-sky-200 group-hover:bg-red-400 flex items-center justify-center transition-colors"
                     >
                       <svg
-                        className="w-3 h-3"
+                        className="w-3 h-3 text-sky-600 group-hover:text-white transition-colors"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -370,13 +430,14 @@ function CuratorPage() {
                           d="M6 18L18 6M6 6l12 12"
                         />
                       </svg>
-                    </button>
-                  </span>
+                    </span>
+                  </button>
                 ))}
                 {selectedRSSSources.map((source) => (
-                  <span
+                  <button
                     key={source.id}
-                    className="inline-flex items-center gap-2 pl-3 pr-2 py-1.5 bg-orange-50 text-orange-700 rounded-full text-sm font-medium border border-orange-200"
+                    onClick={() => removeRSSSource(source.id)}
+                    className="inline-flex items-center gap-2 pl-3 pr-2 py-1.5 bg-orange-50 text-orange-700 rounded-full text-sm font-medium border border-orange-200 hover:bg-orange-100 hover:border-orange-300 transition-all cursor-pointer group"
                   >
                     <svg
                       className="w-4 h-4"
@@ -386,12 +447,11 @@ function CuratorPage() {
                       <path d="M6.18 15.64a2.18 2.18 0 1 1 0 4.36 2.18 2.18 0 0 1 0-4.36zM4 4.44A15.56 15.56 0 0 1 19.56 20h-2.83A12.73 12.73 0 0 0 4 7.27V4.44zm0 5.66a9.9 9.9 0 0 1 9.9 9.9h-2.83A7.07 7.07 0 0 0 4 12.93v-2.83z" />
                     </svg>
                     {source.name}
-                    <button
-                      onClick={() => removeRSSSource(source.id)}
-                      className="w-5 h-5 rounded-full bg-orange-200 hover:bg-orange-300 flex items-center justify-center transition-colors"
+                    <span
+                      className="w-5 h-5 rounded-full bg-orange-200 group-hover:bg-red-400 flex items-center justify-center transition-colors"
                     >
                       <svg
-                        className="w-3 h-3"
+                        className="w-3 h-3 text-orange-600 group-hover:text-white transition-colors"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -403,8 +463,8 @@ function CuratorPage() {
                           d="M6 18L18 6M6 6l12 12"
                         />
                       </svg>
-                    </button>
-                  </span>
+                    </span>
+                  </button>
                 ))}
               </div>
             )}
@@ -500,50 +560,64 @@ function CuratorPage() {
                   onClick={() => toggleTwitterAccount(account.id)}
                   className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
                     account.selected
-                      ? "border-sky-400 bg-sky-50"
+                      ? "border-sky-400 bg-sky-50 shadow-md shadow-sky-100"
                       : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
                   }`}
                 >
                   <div className="flex items-center gap-4">
-                    <div
-                      className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${
-                        account.selected
-                          ? "bg-sky-500 text-white"
-                          : "bg-gradient-to-br from-gray-300 to-gray-400 text-white"
-                      }`}
-                    >
-                      {account.avatar}
+                    <div className="relative">
+                      <img
+                        src={account.avatar}
+                        alt={account.name}
+                        className={`w-12 h-12 rounded-full object-cover ${
+                          account.selected
+                            ? "ring-2 ring-sky-400 ring-offset-2"
+                            : ""
+                        }`}
+                      />
+                      {account.selected && (
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-sky-500 rounded-full flex items-center justify-center">
+                          <svg
+                            className="w-3 h-3 text-white"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={3}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M5 13l4 4L19 7"
+                            />
+                          </svg>
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-900">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-gray-900">
+                          {account.name}
+                        </p>
+                        <svg
+                          className="w-4 h-4 text-sky-500"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                        >
+                          <path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.154-.435.238-.905.238-1.4 0-2.21-1.71-3.998-3.818-3.998-.47 0-.92.084-1.336.25C14.818 2.415 13.51 1.5 12 1.5s-2.816.917-3.437 2.25c-.415-.165-.866-.25-1.336-.25-2.11 0-3.818 1.79-3.818 4 0 .494.083.964.237 1.4-1.272.65-2.147 2.018-2.147 3.6 0 1.495.782 2.798 1.942 3.486-.02.17-.032.34-.032.514 0 2.21 1.708 4 3.818 4 .47 0 .92-.086 1.335-.25.62 1.334 1.926 2.25 3.437 2.25 1.512 0 2.818-.916 3.437-2.25.415.163.865.248 1.336.248 2.11 0 3.818-1.79 3.818-4 0-.174-.012-.344-.033-.513 1.158-.687 1.943-1.99 1.943-3.484zm-6.616-3.334l-4.334 6.5c-.145.217-.382.334-.625.334-.143 0-.288-.04-.416-.126l-.115-.094-2.415-2.415c-.293-.293-.293-.768 0-1.06s.768-.294 1.06 0l1.77 1.767 3.825-5.74c.23-.345.696-.436 1.04-.207.346.23.44.696.21 1.04z" />
+                        </svg>
+                      </div>
+                      <p className="text-sm text-gray-500">
                         {account.handle}
                       </p>
-                      <p className="text-sm text-gray-500 truncate">
+                      <p className="text-xs text-gray-400 mt-1 truncate">
                         {account.bio}
                       </p>
                     </div>
-                    <div
-                      className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                        account.selected
-                          ? "bg-sky-500 border-sky-500"
-                          : "border-gray-300"
-                      }`}
-                    >
-                      {account.selected && (
-                        <svg
-                          className="w-4 h-4 text-white"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={3}
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                      )}
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-gray-700">
+                        {formatFollowers(account.followers)}
+                      </p>
+                      <p className="text-xs text-gray-400">followers</p>
                     </div>
                   </div>
                 </button>
@@ -614,25 +688,44 @@ function CuratorPage() {
                   onClick={() => toggleRSSSource(source.id)}
                   className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
                     source.selected
-                      ? "border-orange-400 bg-orange-50"
+                      ? "border-orange-400 bg-orange-50 shadow-md shadow-orange-100"
                       : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
                   }`}
                 >
                   <div className="flex items-center gap-4">
-                    <div
-                      className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                        source.selected ? "bg-orange-500" : "bg-orange-100"
-                      }`}
-                    >
-                      <svg
-                        className={`w-6 h-6 ${
-                          source.selected ? "text-white" : "text-orange-500"
+                    <div className="relative">
+                      <div
+                        className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
+                          source.selected ? "bg-orange-500" : "bg-orange-100"
                         }`}
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
                       >
-                        <path d="M6.18 15.64a2.18 2.18 0 1 1 0 4.36 2.18 2.18 0 0 1 0-4.36zM4 4.44A15.56 15.56 0 0 1 19.56 20h-2.83A12.73 12.73 0 0 0 4 7.27V4.44zm0 5.66a9.9 9.9 0 0 1 9.9 9.9h-2.83A7.07 7.07 0 0 0 4 12.93v-2.83z" />
-                      </svg>
+                        <svg
+                          className={`w-6 h-6 ${
+                            source.selected ? "text-white" : "text-orange-500"
+                          }`}
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                        >
+                          <path d="M6.18 15.64a2.18 2.18 0 1 1 0 4.36 2.18 2.18 0 0 1 0-4.36zM4 4.44A15.56 15.56 0 0 1 19.56 20h-2.83A12.73 12.73 0 0 0 4 7.27V4.44zm0 5.66a9.9 9.9 0 0 1 9.9 9.9h-2.83A7.07 7.07 0 0 0 4 12.93v-2.83z" />
+                        </svg>
+                      </div>
+                      {source.selected && (
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center border-2 border-white">
+                          <svg
+                            className="w-3 h-3 text-white"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={3}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M5 13l4 4L19 7"
+                            />
+                          </svg>
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-gray-900">{source.name}</p>
