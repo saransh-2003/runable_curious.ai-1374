@@ -20,7 +20,7 @@ app.post('/gemini-news', async (c) => {
       return c.json({ error: 'Query is required' }, 400);
     }
 
-    const GEMINI_API_KEY = 'AIzaSyCG1-rWb9owg3YZgptBrxFnO-5deBZiQAk';
+    const GEMINI_API_KEY = 'AIzaSyB8yDX13cLlqz1rhM1oA8H_Lzoi8uoUG8M';
     const MODEL = 'gemini-2.0-flash';
 
     const prompt = `You are a news aggregator. Search for and provide the top 10 most recent and relevant news articles about: ${query}. 
@@ -148,6 +148,9 @@ app.post('/sarvam-tts', async (c) => {
 
     const SARVAM_API_KEY = 'sk_i8amxjz9_MdARpKfvIofS4VI6vXSya5Lq';
 
+    // Truncate text if too long (Sarvam has a limit)
+    const truncatedText = text.length > 2000 ? text.substring(0, 2000) + '...' : text;
+
     const response = await fetch('https://api.sarvam.ai/text-to-speech', {
       method: 'POST',
       headers: {
@@ -155,9 +158,9 @@ app.post('/sarvam-tts', async (c) => {
         'api-subscription-key': SARVAM_API_KEY,
       },
       body: JSON.stringify({
-        inputs: [text],
+        inputs: [truncatedText],
         target_language_code: 'en-IN',
-        speaker: 'meera',
+        speaker: 'anushka',
         pace: 1.3,
         speech_sample_rate: 22050,
         enable_preprocessing: true,
@@ -167,8 +170,18 @@ app.post('/sarvam-tts', async (c) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Sarvam TTS API error:', errorText);
-      return c.json({ error: 'Failed to generate audio', details: errorText }, 500);
+      console.error('Sarvam TTS API error:', response.status, errorText);
+      
+      // Try to parse error for more details
+      let errorDetails = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorDetails = errorJson.message || errorJson.error || errorText;
+      } catch {
+        // Keep original error text
+      }
+      
+      return c.json({ error: 'Failed to generate audio', details: errorDetails, status: response.status }, 500);
     }
 
     const data = await response.json();
@@ -177,7 +190,8 @@ app.post('/sarvam-tts', async (c) => {
     const audioBase64 = data?.audios?.[0];
 
     if (!audioBase64) {
-      return c.json({ error: 'No audio in response' }, 500);
+      console.error('Sarvam response missing audio:', JSON.stringify(data));
+      return c.json({ error: 'No audio in response', response: data }, 500);
     }
 
     return c.json({
