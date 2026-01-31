@@ -137,7 +137,13 @@ function CuratorPage() {
   };
 
   const handleGenerate = () => {
-    // Navigate to results (future implementation)
+    // Store state in localStorage for results page
+    const curatorState = {
+      prompt,
+      selectedTwitter: selectedTwitterSources.map((acc) => acc.handle),
+      selectedRSS: selectedRSSSources.map((source) => source.name),
+    };
+    localStorage.setItem("curator_state", JSON.stringify(curatorState));
     setLocation("/results");
   };
 

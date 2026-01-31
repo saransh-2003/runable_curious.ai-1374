@@ -4,6 +4,7 @@ import SignupPage from "./pages/signup";
 import LoginPage from "./pages/login";
 import ProfilePage from "./pages/profile";
 import CuratorPage from "./pages/curator";
+import ResultsPage from "./pages/results";
 import { Provider } from "./components/provider";
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
                                 <Route path="/login" component={LoginPage} />
                                 <Route path="/profile" component={ProfilePage} />
                                 <Route path="/curator" component={CuratorPage} />
+                                <Route path="/results" component={ResultsPage} />
                         </Switch>
                 </Provider>
         );
